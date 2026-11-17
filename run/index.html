@@ -42,6 +42,24 @@
     font-family:inherit;font-size:22px;padding:12px 34px;box-shadow:0 5px 0 #d63f7c;cursor:pointer}
   .card button:active{transform:translateY(3px);box-shadow:0 2px 0 #d63f7c}
   .card .home{display:inline-block;margin-top:12px;color:#8a8aa8;font-size:16px;text-decoration:none}
+  .card .line{font-size:16px;color:#8a8aa8;margin-bottom:8px}
+  .card .line b{color:#3a3a5a;font-weight:normal}
+  .newrec{background:#fff4e0;border-radius:16px;padding:10px 12px;margin:6px 0 10px;color:#ff8a3d;font-size:19px}
+  .newrec.hide{display:none}
+  .newrec form{display:flex;gap:6px;margin-top:8px}
+  .newrec input{flex:1;min-width:0;font-family:inherit;font-size:18px;padding:8px 12px;border:2px solid #ffc999;border-radius:12px;
+    outline:none;color:#3a3a5a;user-select:text;-webkit-user-select:text;touch-action:auto}
+  .newrec input:focus{border-color:#ff8a3d}
+  .card .newrec button{margin:0;padding:8px 16px;font-size:18px;background:#ff8a3d;box-shadow:0 4px 0 #d96a22}
+  .newrec .done{color:#3aa55b;font-size:17px}
+  .rank{list-style:none;text-align:left;margin:4px 0 0;border-top:2px dashed #eee}
+  .rank li{display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:2px dashed #eee;font-size:18px}
+  .rank .md{width:26px;text-align:center}
+  .rank .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rank .sc{color:#ff5c9a}
+  .rank .tm{width:46px;text-align:right;color:#a0a0bb;font-size:14px}
+  .rank li.me{background:#fff0f6;border-radius:10px}
+  .rank li.empty{color:#c9c9da}
 </style>
 </head>
 <body>
@@ -67,11 +85,17 @@
 
     <div class="overlay hide" id="overOv">
       <div class="card">
-        <h1>게임 종료</h1>
+        <h1 style="margin-bottom:4px">게임 종료</h1>
         <p class="big">점수 <b id="finalScore">0</b>점</p>
-        <p class="big">플레이 시간 <b id="finalTime">00:00</b></p>
-        <p class="big">도달 레벨 <b id="finalLevel">1</b></p>
-        <p class="sub" id="bestLine"></p>
+        <p class="line">플레이 시간 <b id="finalTime">00:00</b> · 도달 레벨 <b id="finalLevel">1</b></p>
+        <div class="newrec hide" id="newRec">
+          <div id="newRecMsg">🎉 기록 갱신! <span id="newRank">1</span>위</div>
+          <form id="nameForm" autocomplete="off">
+            <input id="nameInput" maxlength="8" placeholder="이름을 적어 주세요" enterkeyhint="done">
+            <button type="submit">등록</button>
+          </form>
+        </div>
+        <ol class="rank" id="rankList"></ol>
         <button id="restartBtn">다시 시작</button><br>
         <a class="home" href="../">← 게임 목록</a>
       </div>
@@ -245,6 +269,7 @@
   cv.addEventListener('pointerdown', e => { e.preventDefault(); jump(); });
 
   window.addEventListener('keydown', e => {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
     if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
       e.preventDefault();
       if (state === 'play') { if (!e.repeat) jump(); }
@@ -264,15 +289,99 @@
     overOv.classList.add('hide');
   }
 
+
+  // ---------- 순위표 (1~3위, 이 기기에 저장) ----------
+  const RANK_KEY = 'rank_run', OLD_BEST = 'runBest';
+  const $newRec = document.getElementById('newRec');
+  const $nameForm = document.getElementById('nameForm');
+  const $nameInput = document.getElementById('nameInput');
+  const $rankList = document.getElementById('rankList');
+  let myEntry = null;
+  function saveRank(list) { try { localStorage.setItem(RANK_KEY, JSON.stringify(list)); } catch (_) {} }
+  function loadRank() {
+    let list = null;
+    try { list = JSON.parse(localStorage.getItem(RANK_KEY)); } catch (_) {}
+    if (!Array.isArray(list)) {
+      // 예전 최고 점수가 있으면 '진경' 이름으로 옮겨 넣기
+      list = [];
+      let ob = 0;
+      try { ob = +localStorage.getItem(OLD_BEST) || 0; } catch (_) {}
+      if (ob > 0) list.push({ name: '진경', score: ob, time: null, id: 1 });
+      saveRank(list);
+    }
+    return list.filter(e => e && typeof e.score === 'number').slice(0, 3);
+  }
+  function renderRank(list) {
+    $rankList.innerHTML = '';
+    const medals = ['🥇', '🥈', '🥉'];
+    for (let i = 0; i < 3; i++) {
+      const e = list[i];
+      const li = document.createElement('li');
+      const md = document.createElement('span'); md.className = 'md'; md.textContent = medals[i];
+      const nm = document.createElement('span'); nm.className = 'nm';
+      const sc = document.createElement('span'); sc.className = 'sc';
+      const tm = document.createElement('span'); tm.className = 'tm';
+      if (e) {
+        nm.textContent = e.name;
+        sc.textContent = e.score + '점';
+        tm.textContent = e.time == null ? '' : fmt(e.time);
+        if (myEntry && e.id === myEntry.id) li.className = 'me';
+      } else {
+        li.className = 'empty'; nm.textContent = '아직 없음'; sc.textContent = '';
+      }
+      li.append(md, nm, sc, tm);
+      $rankList.appendChild(li);
+    }
+  }
+  function recordScore() {
+    const list = loadRank();
+    let pos = list.findIndex(e => score > e.score);
+    if (pos < 0) pos = list.length;
+    myEntry = null;
+    if (score > 0 && pos < 3) {
+      let nm = '';
+      try { nm = localStorage.getItem('playerName') || ''; } catch (_) {}
+      myEntry = { name: nm || '진경', score, time: Math.floor(elapsed), id: Date.now() };
+      list.splice(pos, 0, myEntry);
+      list.length = Math.min(list.length, 3);
+      saveRank(list);
+      document.getElementById('newRecMsg').innerHTML = '🎉 기록 갱신! <span id="newRank"></span>위';
+      document.getElementById('newRank').textContent = pos + 1;
+      $nameInput.value = myEntry.name;
+      $nameForm.style.display = '';
+      $newRec.classList.remove('hide');
+    } else {
+      $newRec.classList.add('hide');
+    }
+    renderRank(list);
+  }
+  $nameForm.addEventListener('submit', e => {
+    e.preventDefault();
+    if (!myEntry) return;
+    const nm = $nameInput.value.trim().slice(0, 8) || '진경';
+    const list = loadRank();
+    const it = list.find(x => x.id === myEntry.id);
+    if (it) { it.name = nm; saveRank(list); }
+    try { localStorage.setItem('playerName', nm); } catch (_) {}
+    $nameInput.blur();
+    $nameForm.style.display = 'none';
+    const msg = document.getElementById('newRecMsg');
+    msg.textContent = '';
+    const done = document.createElement('span'); done.className = 'done';
+    done.textContent = '✔ ' + nm + ' 이름으로 등록했어요!';
+    msg.appendChild(done);
+    renderRank(list);
+  });
+  $nameInput.addEventListener('keydown', e => e.stopPropagation());
+  $nameInput.addEventListener('pointerdown', e => e.stopPropagation());
+
   function gameOver() {
     state = 'over';
     sfx.over();
     document.getElementById('finalScore').textContent = score;
     document.getElementById('finalTime').textContent = fmt(elapsed);
     document.getElementById('finalLevel').textContent = 'Lv.' + level;
-    let best = 0;
-    try { best = +localStorage.getItem('runBest') || 0; if (score > best) { best = score; localStorage.setItem('runBest', best); } } catch (_) { best = Math.max(best, score); }
-    document.getElementById('bestLine').textContent = '최고 점수 ' + best + '점';
+    recordScore();
     setTimeout(() => overOv.classList.remove('hide'), 450);
   }
 
