@@ -315,7 +315,8 @@
   // ---------- 순위표 (1~3위) ----------
   // SCORE_API(구글 시트 웹 앱 주소)가 있으면 모든 휴대폰이 같은 순위표를 함께 봄.
   // 주소가 없거나 인터넷이 안 되면 이 기기에 저장해 두었다가 다음에 연결될 때 올림.
-  const SCORE_API = 'https://script.google.com/macros/s/AKfycbxFh6d1QfYNMH7mYke5bS39mkml2xjWmmX-KQt6wigUHDYe5I5xGHBnDM4NKC5YdGar0g/exec';
+  // 실제 사이트에서만 공유 순위표에 기록 (내 컴퓨터에서 시험할 때는 기록 안 함)
+  const SCORE_API = location.hostname === 'banggu-game.github.io' ? 'https://script.google.com/macros/s/AKfycbxFh6d1QfYNMH7mYke5bS39mkml2xjWmmX-KQt6wigUHDYe5I5xGHBnDM4NKC5YdGar0g/exec' : '';
   const GAME_ID = 'banggu';
   const RANK_KEY = 'rank_banggu', OLD_BEST = 'bangguBest', PEND_KEY = 'pend_banggu', SYNC_KEY = 'synced_banggu';
   const $newRec = document.getElementById('newRec');
