@@ -315,6 +315,7 @@
   function start() {
     reset();
     audio(); sfx.start();
+    refreshShared();
     state = 'play';
     startOv.classList.add('hide');
     overOv.classList.add('hide');
@@ -333,7 +334,7 @@
   const $rankList = document.getElementById('rankList');
   const $rankNote = document.getElementById('rankNote');
   const $topLine = document.getElementById('topLine');
-  let myEntry = null, reqNo = 0, busy = false;
+  let myEntry = null, reqNo = 0;
   const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const lsGet = k => { try { return localStorage.getItem(k); } catch (_) { return null; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} };
@@ -403,8 +404,10 @@
     }
   }
 
+  let lastShown = [];
   function renderRank(list) {
     $rankList.innerHTML = '';
+    if (list) lastShown = list;
     if (!list) {
       const li = document.createElement('li'); li.className = 'empty';
       li.textContent = '⏳ 순위 불러오는 중…';
@@ -445,33 +448,68 @@
     }
   }
   function note(shared) {
-    $rankNote.textContent = !SCORE_API ? '' : shared ? '🌏 모두가 함께 보는 순위표예요' : '📵 인터넷 연결이 안 돼서 이 폰의 기록만 보여요';
+    $rankNote.textContent = !SCORE_API ? '' : shared ? '🌏 모두가 함께 보는 순위표예요' : '📵 인터넷 연결이 안 돼서 기록은 다음에 올라가요';
   }
+
+  // 미리 받아 둔 공유 순위표 (끝났을 때 바로 보여 주려고)
+  const CACHE_KEY = 'cache_' + GAME_ID;
+  const cacheGet = () => jsonList(CACHE_KEY);
+  const cacheSet = list => lsSet(CACHE_KEY, JSON.stringify(list));
+  let fetching = null;
+  function refreshShared() {   // 게임을 시작할 때 미리 받아 두기 (서버도 깨워 둠)
+    if (!SCORE_API || fetching) return;
+    fetching = api().then(l => cacheSet(l)).catch(() => {}).finally(() => { fetching = null; });
+  }
+  function insertInto(list, entry) {
+    const l = list.slice();
+    let pos = l.findIndex(e => entry.score > e.score);
+    if (pos < 0) pos = l.length;
+    if (pos < 3) { l.splice(pos, 0, entry); l.length = Math.min(l.length, 3); }
+    return l;
+  }
+  let addDone = Promise.resolve(), registered = false;
 
   async function recordScore() {
     const my = ++reqNo;
-    myEntry = null;
+    myEntry = null; registered = false;
     $newRec.classList.add('hide');
     if (score > 0) myEntry = { id: newId(), name: '이름 없음', score, time: Math.floor(elapsed) };
-    let list = myEntry ? addLocal(myEntry) : loadRank();
-    if (!SCORE_API) { renderRank(list); showNew(list); note(false); return; }
-    renderRank(null); $rankNote.textContent = '';
-    let shared = true;
-    try {
-      list = myEntry
-        ? await api({ action: 'add', id: myEntry.id, name: myEntry.name, score: myEntry.score, time: myEntry.time })
-        : await api();
-    } catch (_) {
-      shared = false;
-      if (myEntry) addPending(myEntry);
+    const localList = myEntry ? addLocal(myEntry) : loadRank();
+    if (!SCORE_API) { renderRank(localList); showNew(localList); note(false); return; }
+    // 1) 바로 보여 주기: 미리 받아 둔 공유 순위표에 내 점수를 끼워서
+    const cached = cacheGet();
+    if (cached) {
+      const quick = myEntry ? insertInto(cached, myEntry) : cached;
+      renderRank(quick); showNew(quick); note(true);
+    } else {
+      renderRank(null); $rankNote.textContent = '';
     }
+    // 2) 서버에 올린 뒤 실제 순위로 다시 그리기
+    let list = null, shared = true;
+    const job = (async () => {
+      try {
+        list = myEntry
+          ? await api({ action: 'add', id: myEntry.id, name: myEntry.name, score: myEntry.score, time: myEntry.time })
+          : await api();
+        cacheSet(list);
+      } catch (_) {
+        shared = false;
+        if (myEntry) addPending(myEntry);
+      }
+    })();
+    addDone = job;
+    await job;
     if (my !== reqNo) return;
-    renderRank(list); showNew(list); note(shared);
+    if (!list) list = cached ? (myEntry ? insertInto(cached, myEntry) : cached) : localList;
+    if (myEntry && registered) list = list.map(e => e.id === myEntry.id ? Object.assign({}, e, { name: myEntry.name }) : e);
+    renderRank(list);
+    if (!registered) showNew(list);
+    note(shared);
   }
 
   $nameForm.addEventListener('submit', async e => {
     e.preventDefault();
-    if (!myEntry || busy) return;
+    if (!myEntry || registered) return;
     const nm = $nameInput.value.trim().slice(0, 8);
     if (!nm) {
       $nameInput.placeholder = '이름을 먼저 적어 주세요!';
@@ -479,33 +517,37 @@
       $nameInput.focus();
       return;
     }
-    myEntry.name = nm;
+    myEntry.name = nm; registered = true;
     $nameInput.blur();
-    let list = renameLocal(myEntry.id, nm);
+    renameLocal(myEntry.id, nm);
     $nameForm.style.display = 'none';
     const msg = document.getElementById('newRecMsg');
-    msg.textContent = '⏳ 등록하는 중…';
-    let shared = !!SCORE_API;
-    if (SCORE_API) {
-      busy = true;
-      try { list = await api({ action: 'rename', id: myEntry.id, name: nm }); }
-      catch (_) { shared = false; }
-      busy = false;
-    }
     msg.textContent = '';
     const done = document.createElement('span'); done.className = 'done';
     done.textContent = '✔ ' + nm + ' 이름으로 등록했어요!';
     msg.appendChild(done);
-    renderRank(list); note(shared);
+    // 화면에는 바로 반영
+    renderRank(lastShown.map(x => x.id === myEntry.id ? Object.assign({}, x, { name: nm }) : x));
+    if (SCORE_API) {
+      const id = myEntry.id, mine = myEntry;
+      try {
+        await addDone;   // 점수 올리기가 끝난 다음에 이름 바꾸기
+        const l = await api({ action: 'rename', id, name: nm });
+        cacheSet(l);
+        if (myEntry === mine && !overOv.classList.contains('hide')) { renderRank(l); note(true); }
+      } catch (_) { /* 못 올린 기록은 다음 접속 때 이름과 함께 올라감 */ }
+    }
   });
   $nameInput.addEventListener('keydown', e => e.stopPropagation());
   $nameInput.addEventListener('pointerdown', e => e.stopPropagation());
 
-  // 시작 화면에 현재 1위 보여 주기
+  // 시작 화면에 현재 1위 보여 주기 (미리 받아 둔 것을 먼저, 서버 응답 오면 갱신)
   async function showTop() {
-    let list = loadRank();
-    if (SCORE_API) { try { await flushPending(); list = await api(); } catch (_) {} }
-    $topLine.textContent = list[0] ? '🏆 현재 1위 ' + list[0].name + ' ' + list[0].score + '점' : '';
+    const show = list => { $topLine.textContent = list && list[0] ? '🏆 현재 1위 ' + list[0].name + ' ' + list[0].score + '점' : ''; };
+    show(SCORE_API ? (cacheGet() || loadRank()) : loadRank());
+    if (SCORE_API) {
+      try { await flushPending(); const l = await api(); cacheSet(l); show(l); } catch (_) {}
+    }
   }
   showTop();
 
