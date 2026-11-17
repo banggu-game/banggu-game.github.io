@@ -32,6 +32,8 @@
   .newrec input{flex:1;min-width:0;font-family:inherit;font-size:18px;padding:8px 12px;border:2px solid #ffc999;border-radius:12px;
     outline:none;color:#3a3a5a;user-select:text;-webkit-user-select:text;touch-action:auto}
   .newrec input:focus{border-color:#ff8a3d}
+  .newrec input.need{border-color:#ff4d6d;animation:shake .35s}
+  @keyframes shake{25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
   .card .newrec button{margin:0;padding:8px 16px;font-size:18px;background:#ff8a3d;box-shadow:0 4px 0 #d96a22}
   .newrec .done{color:#3aa55b;font-size:17px}
   .rank{list-style:none;text-align:left;margin:4px 0 0;border-top:2px dashed #eee}
@@ -424,7 +426,9 @@
     const pos = myEntry ? list.findIndex(e => e.id === myEntry.id) : -1;
     if (pos >= 0) {
       document.getElementById('newRecMsg').textContent = '🎉 기록 갱신! ' + (pos + 1) + '위';
-      $nameInput.value = myEntry.name;
+      $nameInput.value = '';
+      $nameInput.placeholder = '이름을 적어 주세요';
+      $nameInput.classList.remove('need');
       $nameForm.style.display = '';
       $newRec.classList.remove('hide');
     } else {
@@ -439,7 +443,7 @@
     const my = ++reqNo;
     myEntry = null;
     $newRec.classList.add('hide');
-    if (score > 0) myEntry = { id: newId(), name: lsGet('playerName') || '진경', score, time: Math.floor(elapsed) };
+    if (score > 0) myEntry = { id: newId(), name: '이름 없음', score, time: Math.floor(elapsed) };
     let list = myEntry ? addLocal(myEntry) : loadRank();
     if (!SCORE_API) { renderRank(list); showNew(list); note(false); return; }
     renderRank(null); $rankNote.textContent = '';
@@ -459,9 +463,14 @@
   $nameForm.addEventListener('submit', async e => {
     e.preventDefault();
     if (!myEntry || busy) return;
-    const nm = $nameInput.value.trim().slice(0, 8) || '진경';
+    const nm = $nameInput.value.trim().slice(0, 8);
+    if (!nm) {
+      $nameInput.placeholder = '이름을 먼저 적어 주세요!';
+      $nameInput.classList.remove('need'); void $nameInput.offsetWidth; $nameInput.classList.add('need');
+      $nameInput.focus();
+      return;
+    }
     myEntry.name = nm;
-    lsSet('playerName', nm);
     $nameInput.blur();
     let list = renameLocal(myEntry.id, nm);
     $nameForm.style.display = 'none';
